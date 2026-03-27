@@ -1,36 +1,48 @@
 from flask import Flask, request, jsonify
 import psycopg2
 import os
-from urllib.parse import urlparse
 
 app = Flask(__name__)
 
 # Подключение к БД
-DATABASE_URL = os.environ.get('postgresql://serverless_db_t9oz_user:Y0QFDk5rZ287tYn1uUz0id1CNvbK8eWB@dpg-d738ksi4d50c73fjfjbg-a.oregon-postgres.render.com/serverless_db_t9oz')
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+conn = None
+
 if DATABASE_URL:
-    url = urlparse(DATABASE_URL)
-    conn = psycopg2.connect(
-        database=url.path[1:],
-        user=url.username,
-        password=url.password,
-        host=url.hostname,
-        port=url.port
-    )
+    try:
+        # фикс для Render (иногда postgres:// вместо postgresql://)
+        if DATABASE_URL.startswith("postgres://"):
+            DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+        conn = psycopg2.connect(DATABASE_URL)
+        print("✅ DB CONNECTED")
+
+        # Создание таблицы
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id SERIAL PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+
+    except Exception as e:
+        print("❌ DB ERROR:", e)
+        conn = None
 else:
-    conn = None
+    print("❌ DATABASE_URL not found")
 
-# Создание таблицы при старте
-if conn:
-    with conn.cursor() as cur:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id SERIAL PRIMARY KEY,
-                content TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
-        conn.commit()
 
+# Главная страница (чтобы не было 404)
+@app.route("/")
+def home():
+    return "API is running 🚀"
+
+
+# Сохранить сообщение
 @app.route('/save', methods=['POST'])
 def save_message():
     if not conn:
@@ -45,18 +57,31 @@ def save_message():
 
     return jsonify({"status": "saved", "message": message})
 
+
+# Получить сообщения
 @app.route('/messages')
 def get_messages():
     if not conn:
         return jsonify({"error": "DB not connected"}), 500
 
     with conn.cursor() as cur:
-        cur.execute("SELECT id, content, created_at FROM messages ORDER BY id DESC LIMIT 10")
+        cur.execute("""
+            SELECT id, content, created_at 
+            FROM messages 
+            ORDER BY id DESC 
+            LIMIT 10
+        """)
         rows = cur.fetchall()
 
-    messages = [{"id": r[0], "text": r[1], "time": r[2].isoformat()} for r in rows]
+    messages = [
+        {"id": r[0], "text": r[1], "time": r[2].isoformat()}
+        for r in rows
+    ]
+
     return jsonify(messages)
 
+
+# Запуск сервера (ВАЖНО для Render)
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
