@@ -15,7 +15,7 @@ if DATABASE_URL:
         if DATABASE_URL.startswith("postgres://"):
             DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = psycopg2.connect(DATABASE_URL, sslmode="require")
         print("✅ DB CONNECTED")
 
         # Создание таблицы
